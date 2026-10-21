@@ -1,0 +1,316 @@
+
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174D38">
+  <title>Familiens affaldskalender</title>
+  <style>
+    :root {
+      --green: #174D38;
+      --light-green: #28674D;
+      --muted: #C4E1D0;
+      --white: #FFFFFF;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--green);
+      color: var(--white);
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+    }
+
+    .card {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 21px;
+      font-weight: 700;
+    }
+
+    .expand {
+      border: 0;
+      background: transparent;
+      color: white;
+      font-size: 23px;
+      cursor: pointer;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.3px;
+      margin-bottom: 14px;
+    }
+
+    .next {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .date-box {
+      min-width: 88px;
+      padding: 12px;
+      background: var(--light-green);
+      border-radius: 13px;
+      text-align: center;
+    }
+
+    .day {
+      font-size: 37px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .month {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .type {
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .weekday {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .divider {
+      border: 0;
+      border-top: 1px solid #56836B;
+      margin: 22px 0;
+    }
+
+    .item {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      font-size: 15px;
+    }
+
+    .item + .item {
+      border-top: 1px solid #35634C;
+    }
+
+    .item-type {
+      text-align: right;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 16px 0;
+    }
+
+    .hidden { display: none; }
+
+    .full .card {
+      max-width: 800px;
+    }
+
+    .full .header {
+      margin-bottom: 40px;
+    }
+
+    @media (min-width: 700px) {
+      body { padding: 26px; }
+      .header h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<main class="card">
+  <header class="header">
+    <h1>♻ Affald og renovation</h1>
+    <button class="expand" id="expand" title="Udvid oversigt">
+      ⛶
+    </button>
+  </header>
+
+  <div id="loading" class="status">
+    Henter tømningsdatoer...
+  </div>
+
+  <section id="content" class="hidden">
+    <div class="eyebrow">NÆSTE TØMNING</div>
+
+    <div class="next">
+      <div class="date-box">
+        <div class="day" id="next-day"></div>
+        <div class="month" id="next-month"></div>
+      </div>
+
+      <div>
+        <div class="type" id="next-type"></div>
+        <div class="weekday" id="next-weekday"></div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="eyebrow">DEREFTER</div>
+    <div id="upcoming"></div>
+  </section>
+</main>
+
+<script>
+  const SUPABASE_URL =
+    "https://kxopqitccnoycjwpibuj.supabase.co";
+
+  // INDSÆT DIN SB_PUBLISHABLE-NØGLE HER
+  const SUPABASE_KEY = "sb_publishable_J6Ez04iYCczh_FW8OOQnig_3zcGxeaI";
+
+  const tableUrl =
+    SUPABASE_URL +
+    "/rest/v1/affald_toemninger" +
+    "?select=dato,affaldstype&order=dato.asc";
+
+  const dateFormat = new Intl.DateTimeFormat("da-DK", {
+    timeZone: "Europe/Copenhagen",
+    day: "numeric",
+    month: "long"
+  });
+
+  function todayInDenmark() {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Copenhagen",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+
+    const get = name =>
+      parts.find(p => p.type === name).value;
+
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }
+
+  function formatType(type) {
+    if (type.includes("Plast/MDK")) {
+      return "Glas/papir/plast";
+    }
+
+    if (type.includes("Mad-/Rest")) {
+      return "Mad- og restaffald";
+    }
+
+    return type;
+  }
+
+  function parseDate(iso) {
+    return new Date(iso + "T12:00:00Z");
+  }
+
+  function formatDate(iso) {
+    return dateFormat.format(parseDate(iso));
+  }
+
+  function formatWeekday(iso) {
+    return new Intl.DateTimeFormat("da-DK", {
+      timeZone: "Europe/Copenhagen",
+      weekday: "long"
+    }).format(parseDate(iso));
+  }
+
+  function showError(message) {
+    document.getElementById("loading").textContent = message;
+  }
+
+  async function loadCollections() {
+    try {
+      const response = await fetch(tableUrl, {
+        headers: {
+          apikey: SUPABASE_KEY
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+
+      const rows = await response.json();
+      const today = todayInDenmark();
+
+      const upcoming = rows.filter(row => row.dato >= today);
+
+      if (!upcoming.length) {
+        showError("Ingen kommende tømningsdatoer er offentliggjort.");
+        return;
+      }
+
+      const next = upcoming[0];
+
+      document.getElementById("next-day").textContent =
+        Number(next.dato.slice(8, 10));
+
+      document.getElementById("next-month").textContent =
+        formatDate(next.dato).split(" ").slice(1).join(" ");
+
+      document.getElementById("next-type").textContent =
+        formatType(next.affaldstype);
+
+      document.getElementById("next-weekday").textContent =
+        formatWeekday(next.dato);
+
+      const container = document.getElementById("upcoming");
+      container.replaceChildren();
+
+      upcoming.slice(1).forEach(item => {
+        const row = document.createElement("div");
+        row.className = "item";
+
+        const date = document.createElement("span");
+        date.textContent = formatDate(item.dato);
+
+        const type = document.createElement("span");
+        type.className = "item-type";
+        type.textContent = formatType(item.affaldstype);
+
+        row.append(date, type);
+        container.appendChild(row);
+      });
+
+      document.getElementById("loading").classList.add("hidden");
+      document.getElementById("content").classList.remove("hidden");
+
+    } catch (error) {
+      console.error(error);
+      showError("Kunne ikke hente tømningsdatoerne.");
+    }
+  }
+
+  document.getElementById("expand").addEventListener("click", () => {
+    const full = document.body.classList.toggle("full");
+
+    document.getElementById("expand").textContent =
+      full ? "↙" : "⛶";
+  });
+
+  loadCollections();
+</script>
+
+</body>
+</html>
